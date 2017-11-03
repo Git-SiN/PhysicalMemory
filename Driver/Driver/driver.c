@@ -1,11 +1,9 @@
-#include "ntddk.h"
-
+#include "../../Headers/driver.h"
 
 
 VOID DriverUnload(PDRIVER_OBJECT pDriverObject)
 {
 	DbgPrintEx(101, 0, "Driver Unloaded...\n");
-
 }
 
 NTSTATUS DispatchRoutine(PDEVICE_OBJECT pDeviceObject, PIRP pIrp) {
@@ -14,7 +12,7 @@ NTSTATUS DispatchRoutine(PDEVICE_OBJECT pDeviceObject, PIRP pIrp) {
 
 	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
 	return STATUS_SUCCESS;
-
+		
 }
 
 NTSTATUS DriverEntry(PDRIVER_OBJECT pDriverObject, PUNICODE_STRING regPath) {
@@ -25,5 +23,6 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT pDriverObject, PUNICODE_STRING regPath) {
 
 	pDriverObject->DriverUnload = DriverUnload;
 
+	DbgPrintEx(101, 0, "Driver loaded...\n");
 	return STATUS_SUCCESS;
 }
