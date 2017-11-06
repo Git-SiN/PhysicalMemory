@@ -1,11 +1,10 @@
 # PhysicalMemory
-First Git Project by VS
+First Git Project used VS
 
 
+This project is an experiment for handling Physical Memory & Working Sets.
 
-This project is an experiment for handling the Physical Memory & Working Sets.
 only for get any hints for my other project...
-
 
 
 
