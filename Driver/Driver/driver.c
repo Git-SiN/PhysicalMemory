@@ -4,7 +4,7 @@
 //////////////////////		HARDCODING for test		//////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////
 #define MEMORY_SIZE						4							// GB
-#define TARGET_EPROCESS					0x85a60030              		// for test
+#define TARGET_EPROCESS					0x85b36d28  			// for test
 //////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////
@@ -77,7 +77,9 @@ NTSTATUS ManipulateForSniffing(ULONG targetEprocess) {
 
 
 			/////////////////////		Manipulation		/////////////////////
-			mov dword ptr ds:[eax], TARGET_EPROCESS;
+			//mov dword ptr ds:[eax], TARGET_EPROCESS;
+			mov ebx, targetEprocess;
+			mov [eax], ebx;
 
 			mov ebx, targetPDT;
 			mov cr3, ebx;
@@ -99,12 +101,12 @@ NTSTATUS ManipulateForSniffing(ULONG targetEprocess) {
 	pBackup->BackedCR3 = backedCR3;
 	pBackup->BackedEthread = backedEthread;
 	
-	DbgPrintEx(101, 0, "Succeeded to manipulate...\n");
+	DbgPrintEx(101, 0, "Succeeded to manipulate [%s]\n", (PUCHAR)((*(PULONG)(pBackup->BackedEthread + KTHREAD_OFFSET_KPROCESS)) + EPROC_OFFSET_ImageFileName));
 	return STATUS_SUCCESS;
 }
 
 
-VOID RestoreManipulation()
+VOID RestoreManipulated()
 {
 	ULONG backedCR3 = 0;
 	ULONG backedEthread = 0;
@@ -153,7 +155,55 @@ VOID RestoreManipulation()
 	return;
 }
 
-VOID DumpPhysicalMemory(ULONG targetEprocess, ULONG CountOfPageFrame) {
+VOID OutputWorkingSetList(ULONG targetEprocess) {
+	PMMWSLE pList = NULL;
+	ULONG count = 0;
+	ULONG i = 0;
+
+	if (NT_SUCCESS(ManipulateForSniffing(targetEprocess))) {
+		count = ((PMMWSL)(((PMMSUPPORT)(targetEprocess + EPROC_OFFSET_Vm))->VmWorkingSetList))->LastInitializedWsle;
+		RestoreManipulated();
+	}
+	else
+		return;
+
+	if (count > 0) {
+		pList = ExAllocatePool(NonPagedPool, count * sizeof(ULONG));
+		if (pList != NULL) {
+			RtlZeroMemory(pList, count * sizeof(ULONG));
+			if (NT_SUCCESS(ManipulateForSniffing(targetEprocess))) {
+				__try {
+					RtlCopyMemory((PVOID)pList, (PVOID)(((PMMWSL)(((PMMSUPPORT)(targetEprocess + EPROC_OFFSET_Vm))->VmWorkingSetList))->Wsle), count * sizeof(ULONG));
+					RestoreManipulated();
+				}
+				__except (EXCEPTION_EXECUTE_HANDLER) {
+					RestoreManipulated();
+					DbgPrintEx(101, 0, "[ERROR] Exception occured in RtlCopyMemory()\n");
+					ExFreePool(pList);
+					pList = NULL;
+				}				
+			}
+			else {
+				ExFreePool(pList);
+				pList = NULL;
+			}
+		}
+	}
+
+	// Output...
+	if (pList != NULL) {
+		for (i = 0; i < count; i++) {
+			if (pList[i].u1.e1.Valid) {
+				DbgPrintEx(101, 0, "[%4d] VPN : 0x%05X %s\n", i, pList[i].u1.e1.VirtualPageNumber, (pList[i].u1.e1.Hashed)? "[H]" : "");
+			}
+		}
+	}
+
+	ExFreePool(pList);
+}
+
+
+VOID OutputPhysicalAddress(ULONG targetEprocess, ULONG CountOfPageFrame) {
 	PHYSICAL_ADDRESS pa;
 	ULONG i = 0;
 	ULONG virtualAddress = 0;
@@ -206,7 +256,7 @@ VOID DumpPhysicalMemory(ULONG targetEprocess, ULONG CountOfPageFrame) {
 		}
 	}
 
-	RestoreManipulation();
+	RestoreManipulated();
 	
 	// Output...
 	for (i = 0; i < CountOfPageFrame; i++) {
@@ -230,8 +280,12 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT pDriverObject, PUNICODE_STRING regPath) {
 
 	pDriverObject->DriverUnload = DriverUnload;
 	
-	DumpPhysicalMemory(TARGET_EPROCESS, MEMORY_SIZE * 256);	// GB to Pages
-	
-	DbgPrintEx(101, 0, "Driver loaded...\n");
+	//OutputPhysicalAddress(TARGET_EPROCESS, MEMORY_SIZE * 256);	// GB to Pages
+	OutputWorkingSetList(TARGET_EPROCESS);
+
+	// for TEST...
+	//if (NT_SUCCESS(ManipulateForSniffing(TARGET_EPROCESS)))
+	//	RestoreManipulated();
+
 	return STATUS_SUCCESS;
 }

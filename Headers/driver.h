@@ -6,6 +6,7 @@
 #define KPROC_OFFSET_DirectoryTableBase				0x018		//  Uint4B
 #define EPROC_OFFSET_VadRoot						0x278		//  _MM_AVL_TABLE
 
+#define EPROC_OFFSET_Vm								0x1f0 //  _MMSUPPOR
 
 #pragma pack(1)
 /////////////////////////////////////////////////////////////////////////////////////////////
