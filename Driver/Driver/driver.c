@@ -4,7 +4,7 @@
 //////////////////////		HARDCODING for test		//////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////
 #define MEMORY_SIZE						4							// GB
-#define TARGET_EPROCESS					0x85b36d28  			// for test
+#define TARGET_EPROCESS					0x85bb8d28      			// for test
 //////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////
@@ -156,50 +156,111 @@ VOID RestoreManipulated()
 }
 
 VOID OutputWorkingSetList(ULONG targetEprocess) {
-	PMMWSLE pList = NULL;
-	ULONG count = 0;
+	PMMWSLE pEntry = NULL;
+	PMMWSL pList = NULL;
 	ULONG i = 0;
+	ULONG invalidCount = 0;
+
+	pList = ExAllocatePool(NonPagedPool, sizeof(MMWSL));
+	if (pList == NULL) {
+		DbgPrintEx(101, 0, "[ERROR] Failed to allocate pool...\n");
+		return;
+	}
+	RtlZeroMemory(pList, sizeof(MMWSL));
 
 	if (NT_SUCCESS(ManipulateForSniffing(targetEprocess))) {
-		count = ((PMMWSL)(((PMMSUPPORT)(targetEprocess + EPROC_OFFSET_Vm))->VmWorkingSetList))->LastInitializedWsle;
-		RestoreManipulated();
+		__try {
+			RtlCopyMemory((PVOID)pList, (PVOID)(((PMMSUPPORT)(targetEprocess + EPROC_OFFSET_Vm))->VmWorkingSetList), sizeof(MMWSL));
+			RestoreManipulated();
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER) {
+			RestoreManipulated();
+			DbgPrintEx(101, 0, "[ERROR] Exception occured in RtlCopyMemory()\n");
+			ExFreePool(pList);
+			pList = NULL;
+		}
 	}
-	else
+	else {
+		ExFreePool(pList);
+		pList = NULL;
 		return;
-
-	if (count > 0) {
-		pList = ExAllocatePool(NonPagedPool, count * sizeof(ULONG));
-		if (pList != NULL) {
-			RtlZeroMemory(pList, count * sizeof(ULONG));
+	}
+	
+	if ((pList != NULL) && ((pList->LastInitializedWsle) > 0)) {
+		pEntry = ExAllocatePool(NonPagedPool, (pList->LastInitializedWsle) * sizeof(ULONG));
+		if (pEntry != NULL) {
+			RtlZeroMemory(pEntry, (pList->LastInitializedWsle) * sizeof(ULONG));
 			if (NT_SUCCESS(ManipulateForSniffing(targetEprocess))) {
 				__try {
-					RtlCopyMemory((PVOID)pList, (PVOID)(((PMMWSL)(((PMMSUPPORT)(targetEprocess + EPROC_OFFSET_Vm))->VmWorkingSetList))->Wsle), count * sizeof(ULONG));
+					RtlCopyMemory((PVOID)pEntry, (PVOID)(((PMMWSL)(((PMMSUPPORT)(targetEprocess + EPROC_OFFSET_Vm))->VmWorkingSetList))->Wsle), (pList->LastInitializedWsle) * sizeof(ULONG));
 					RestoreManipulated();
 				}
 				__except (EXCEPTION_EXECUTE_HANDLER) {
 					RestoreManipulated();
 					DbgPrintEx(101, 0, "[ERROR] Exception occured in RtlCopyMemory()\n");
-					ExFreePool(pList);
-					pList = NULL;
-				}				
+					ExFreePool(pEntry);
+					pEntry = NULL;
+				}
 			}
 			else {
-				ExFreePool(pList);
-				pList = NULL;
+				ExFreePool(pEntry);
+				pEntry = NULL;
 			}
 		}
 	}
 
 	// Output...
-	if (pList != NULL) {
-		for (i = 0; i < count; i++) {
-			if (pList[i].u1.e1.Valid) {
-				DbgPrintEx(101, 0, "[%4d] VPN : 0x%05X %s\n", i, pList[i].u1.e1.VirtualPageNumber, (pList[i].u1.e1.Hashed)? "[H]" : "");
+	if (pEntry != NULL) {
+		for (i = 0; i <= (pList->LastInitializedWsle); i++) {
+			if (pEntry[i].u1.e1.Valid) {
+				DbgPrintEx(101, 0, "[0x%05X] VPN : 0x%05X %s\n", i, pEntry[i].u1.e1.VirtualPageNumber, (pEntry[i].u1.e1.Hashed) ? "[H]" : "");
 			}
 		}
+		DbgPrintEx(101, 0, "\n------------------------------------------\n\n");
+		for (i = 0; i <= (pList->LastInitializedWsle); i++) {
+			if (!(pEntry[i].u1.e1.Valid)) {
+				DbgPrintEx(101, 0, "[0x%05X] Next Free : 0x%05X   Previous Free : 0x%05X\n", i, pEntry[i].u1.e2.NextFree, pEntry[i].u1.e2.PreviousFree);
+				invalidCount++;
+			}
+		}
+		DbgPrintEx(101, 0, "\n------------------------------------------\n\n");
+		DbgPrintEx(101, 0, "::: Valid WSLE Entries : 0x%04X [%4d]\n", (pList->LastInitializedWsle) - invalidCount + 1, (pList->LastInitializedWsle) - invalidCount + 1);
+		DbgPrintEx(101, 0, "::: Free WSLE Entries : 0x%04X [%4d]\n", invalidCount, invalidCount);
+	}
+
+	if (pList != NULL) {
+		DbgPrintEx(101, 0, "\n------------------------------------------\n\n");
+		DbgPrintEx(101, 0, "::: Last Entry : 0x%08X\n", (pList->LastEntry));
+		DbgPrintEx(101, 0, "::: Last Initialized Wsle : 0x%08X\n\n", (pList->LastInitializedWsle));
+		
+		DbgPrintEx(101, 0, "::: First Dynamic : 0x%08X\n", (pList->FirstDynamic));
+		DbgPrintEx(101, 0, "::: First Free : 0x%08X\n\n", (pList->FirstFree));
+
+		DbgPrintEx(101, 0, "::: Hash Table Start : 0x%08X\n", (pList->HashTableStart));
+		DbgPrintEx(101, 0, "::: Highest Permitted Hash Address : 0x%08X\n\n", (pList->HighestPermittedHashAddress));
+		
+		DbgPrintEx(101, 0, "::: NonDirect Count : 0x%08X\n", (pList->NonDirectCount));
+		DbgPrintEx(101, 0, "::: NonDirect Hash : 0x%08X\n\n", (pList->NonDirectHash));
+		
+		DbgPrintEx(101, 0, "::: Last Allocation Size : 0x%08X\n", (pList->LastAllocationSize));
+		DbgPrintEx(101, 0, "::: Last Allocation Size Hint : 0x%08X\n\n", (pList->LastAllocationSizeHint));
+		
+		DbgPrintEx(101, 0, "::: Committed Page Tables : 0x%08X\n", (pList->CommittedPageTables));
+		DbgPrintEx(101, 0, "::: Number Of Committed Page Tables : 0x%08X\n", (pList->NumberOfCommittedPageTables));
+		DbgPrintEx(101, 0, "::: Used Page Table Entries : 0x%08X\n\n", (pList->UsedPageTableEntries));
+		
+		DbgPrintEx(101, 0, "::: Last Vad Bit : 0x%08X\n", (pList->LastVadBit));
+		DbgPrintEx(101, 0, "::: Maximum Last Vad Bit : 0x%08X\n", (pList->MaximumLastVadBit));
+
+		DbgPrintEx(101, 0, "::: Next Slot : 0x%08X\n", (pList->NextSlot));
+		DbgPrintEx(101, 0, "::: Next Aging Slot : 0x%08X\n\n", (pList->NextAgingSlot));
+
 	}
 
 	ExFreePool(pList);
+	ExFreePool(pEntry);
+
+	return;
 }
 
 
